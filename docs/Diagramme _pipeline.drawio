@@ -1,0 +1,112 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="3zJTRNwdI7Uj2Iqs8lS4">
+    <mxGraphModel dx="1414" dy="783" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Fichier_erp.xlxs" vertex="1">
+          <mxGeometry height="60" width="120" x="150" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="fichier_liaison.xlsx" vertex="1">
+          <mxGeometry height="60" width="120" x="335" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Fichier_web.xlsx" vertex="1">
+          <mxGeometry height="60" width="120" x="520" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Nettoyage des valeurs manquantes&lt;br/&gt;SQL DuckDB" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-7" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-2" style="endArrow=classic;html=1;rounded=0;exitX=0.567;exitY=0.983;exitDx=0;exitDy=0;exitPerimeter=0;" target="HuuBTxDDkU9J5QKTe3r2-5" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="430" as="sourcePoint" />
+            <mxPoint x="440" y="380" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-8" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-3" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.543;entryY=0.067;entryDx=0;entryDy=0;entryPerimeter=0;" target="HuuBTxDDkU9J5QKTe3r2-5" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="430" as="sourcePoint" />
+            <mxPoint x="440" y="380" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-9" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-4" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" target="HuuBTxDDkU9J5QKTe3r2-5" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="190" as="sourcePoint" />
+            <mxPoint x="404" y="286" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-10" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Test : absence de valeurs manquantes" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-11" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Dédoublonnage&lt;br/&gt;SQL DuckDB" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-12" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Fusion ERP + liaison + Web&lt;br/&gt;SQL DuckDB" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-13" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Test : cohérence de la jointure" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="555" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Calcul du chiffre d&#39;affaires&lt;br/&gt;SQL DuckDB" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-15" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Test : cohérence du CA" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="765" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Calcul du z-score&lt;br/&gt;Python / pandas" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-17" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Test : z-score sur le prix" vertex="1">
+          <mxGeometry height="60" width="230" x="270" y="940" as="geometry" />
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-19" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-5" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-10" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="440" as="sourcePoint" />
+            <mxPoint x="440" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-21" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-10" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-11" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="440" as="sourcePoint" />
+            <mxPoint x="440" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-25" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-12" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-13" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="440" as="sourcePoint" />
+            <mxPoint x="440" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-27" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-11" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-12" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="440" as="sourcePoint" />
+            <mxPoint x="440" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-29" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-13" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-14" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="640" as="sourcePoint" />
+            <mxPoint x="440" y="590" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-31" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-14" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-15" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="640" as="sourcePoint" />
+            <mxPoint x="440" y="590" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-32" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-15" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-16" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="640" as="sourcePoint" />
+            <mxPoint x="440" y="590" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="HuuBTxDDkU9J5QKTe3r2-33" edge="1" parent="1" source="HuuBTxDDkU9J5QKTe3r2-16" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="HuuBTxDDkU9J5QKTe3r2-17" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="640" as="sourcePoint" />
+            <mxPoint x="440" y="590" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
