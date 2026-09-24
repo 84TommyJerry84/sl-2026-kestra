@@ -1,0 +1,309 @@
+id: pipeline_comptoir
+namespace: comptoir.coteaux
+
+tasks:
+
+#simulation d'une panne/erreur
+
+# - id: test_panne
+#   type: io.kestra.plugin.core.execution.Fail
+#   errorMessage: "Panne volontaire pour tester la gestion des erreurs"
+
+- id: nettoyage_sources
+  type: io.kestra.plugin.jdbc.duckdb.Queries
+  communityExtensions: []
+
+  inputFiles:
+    data/Fichier_erp.xlsx: nsfile:///data/Fichier_erp.xlsx
+    data/fichier_liaison.xlsx: nsfile:///data/fichier_liaison.xlsx
+    data/Fichier_web.xlsx: nsfile:///data/Fichier_web.xlsx
+
+  sql: "{{ read('nsfile:///sql/etape1_clean.sql') }}"
+
+  outputDbFile: true
+
+#test1 check nettoyage
+
+- id: test_valeurs_manquantes
+  type: io.kestra.plugin.jdbc.duckdb.Query
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.nettoyage_sources.databaseUri }}"
+
+  sql: |
+    SELECT
+      (SELECT COUNT(*) FROM erp_clean
+       WHERE product_id IS NULL) AS null_erp,
+
+      (SELECT COUNT(*) FROM liaison_clean
+       WHERE product_id IS NULL) AS null_liaison,
+
+      (SELECT COUNT(*) FROM web_clean
+       WHERE sku IS NULL OR TRIM(sku) = '') AS null_web;
+
+  fetchType: FETCH_ONE
+
+- id: assert_valeurs_manquantes
+  type: io.kestra.plugin.core.execution.Assert
+
+  conditions:
+  - "{{ outputs.test_valeurs_manquantes.row.null_erp == 0 }}"
+  - "{{ outputs.test_valeurs_manquantes.row.null_liaison == 0 }}"
+  - "{{ outputs.test_valeurs_manquantes.row.null_web == 0 }}"
+
+  errorMessage: "Test valeurs manquantes échoué"
+
+- id: dedoublonnage
+  type: io.kestra.plugin.jdbc.duckdb.Queries
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.nettoyage_sources.databaseUri }}"
+
+  sql: "{{ read('nsfile:///sql/etape2_deduplicate.sql') }}"
+
+  outputDbFile: true
+
+#test2 check dedoublonage
+
+- id: test_doublons
+  type: io.kestra.plugin.jdbc.duckdb.Query
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.dedoublonnage.databaseUri }}"
+
+  sql: |
+    SELECT
+      (
+        SELECT COUNT(*)
+        FROM (
+          SELECT product_id
+          FROM erp_dedup
+          GROUP BY product_id
+          HAVING COUNT(*) > 1
+        )
+      ) AS doublons_erp,
+
+      (
+        SELECT COUNT(*)
+        FROM (
+          SELECT product_id
+          FROM liaison_dedup
+          GROUP BY product_id
+          HAVING COUNT(*) > 1
+        )
+      ) AS doublons_liaison,
+
+      (
+        SELECT COUNT(*)
+        FROM (
+          SELECT sku
+          FROM web_dedup
+          GROUP BY sku
+          HAVING COUNT(*) > 1
+        )
+      ) AS doublons_web;
+
+  fetchType: FETCH_ONE
+
+- id: assert_doublons
+  type: io.kestra.plugin.core.execution.Assert
+
+  conditions:
+  - "{{ outputs.test_doublons.row.doublons_erp == 0 }}"
+  - "{{ outputs.test_doublons.row.doublons_liaison == 0 }}"
+  - "{{ outputs.test_doublons.row.doublons_web == 0 }}"
+
+  errorMessage: "Test doublons échoué"
+
+- id: fusion
+  type: io.kestra.plugin.jdbc.duckdb.Queries
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.dedoublonnage.databaseUri }}"
+
+  sql: "{{ read('nsfile:///sql/etape3_merge.sql') }}"
+
+  outputDbFile: true
+
+#test3  check de la jointure
+
+- id: test_jointure
+  type: io.kestra.plugin.jdbc.duckdb.Query
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.fusion.databaseUri }}"
+
+  sql: |
+    SELECT
+      COUNT(*) AS nb_lignes_fusion,
+
+      COUNT(*) FILTER (
+        WHERE id_web <> sku
+      ) AS jointures_incoherentes
+
+    FROM merged_data;
+
+  fetchType: FETCH_ONE
+
+- id: assert_jointure
+  type: io.kestra.plugin.core.execution.Assert
+
+  conditions:
+  - "{{ outputs.test_jointure.row.nb_lignes_fusion == 714 }}"
+  - "{{ outputs.test_jointure.row.jointures_incoherentes == 0 }}"
+
+  errorMessage: "Test de cohérence de la jointure échoué"
+
+- id: calcul_ca
+  type: io.kestra.plugin.jdbc.duckdb.Queries
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.fusion.databaseUri }}"
+
+  sql: "{{ read('nsfile:///sql/etape4_cal_revenue.sql') }}"
+
+  outputDbFile: true
+
+#test4 check du ca
+
+- id: test_ca
+  type: io.kestra.plugin.jdbc.duckdb.Query
+  communityExtensions: []
+
+  databaseUri: "{{ outputs.calcul_ca.databaseUri }}"
+
+  sql: |
+    SELECT
+      CAST(
+        ROUND(chiffre_affaires_total * 100, 0)
+        AS BIGINT
+      ) AS ca_total_centimes
+    FROM revenue_total;
+
+  fetchType: FETCH_ONE
+
+- id: assert_ca
+  type: io.kestra.plugin.core.execution.Assert
+
+  conditions:
+  - "{{ outputs.test_ca.row.ca_total_centimes == 7056860 }}"
+
+  errorMessage: "Test du chiffre d'affaires échoué"
+
+- id: calcul_zscore
+  type: io.kestra.plugin.scripts.python.Commands
+
+  taskRunner:
+    type: io.kestra.plugin.scripts.runner.docker.Docker
+
+  containerImage: python:3.12-slim
+
+  namespaceFiles:
+    enabled: true
+    include:
+    - python/zscore.py
+
+  inputFiles:
+    work/comptoir.duckdb: "{{ outputs.calcul_ca.databaseUri }}"
+
+  beforeCommands:
+  - python -m pip install --no-cache-dir duckdb==1.5.5 pandas==3.0.6
+
+  commands:
+  #test du retry =>
+  - cd "{{ workingDir }}" && python python/zscore.py
+  #- cd "{{ workingDir }}" && python python/fichier_inexistant.py
+
+  outputFiles:
+  - outputs/vins_premium.csv
+  - outputs/vins_ordinaires.csv
+
+  retry:
+    type: constant
+    interval: PT10S
+    maxAttempts: 3
+    maxDuration: PT1M
+    warningOnRetry: true
+
+#test5 check du zscore
+
+- id: test_zscore
+  type: io.kestra.plugin.jdbc.duckdb.Query
+  communityExtensions: []
+
+  inputFiles:
+    vins_premium.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_premium.csv'] }}"
+    vins_ordinaires.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_ordinaires.csv'] }}"
+
+  sql: |
+    SELECT
+      (SELECT COUNT(*) FROM read_csv_auto('vins_premium.csv')) AS nb_premium,
+
+      (SELECT COUNT(*)
+       FROM read_csv_auto('vins_premium.csv')
+       WHERE zscore <= 2) AS premium_incorrects,
+
+      (SELECT COUNT(*)
+       FROM read_csv_auto('vins_ordinaires.csv')
+       WHERE zscore > 2) AS ordinaires_incorrects;
+
+  fetchType: FETCH_ONE
+
+- id: assert_zscore
+  type: io.kestra.plugin.core.execution.Assert
+
+  conditions:
+  - "{{ outputs.test_zscore.row.nb_premium == 30 }}"
+  - "{{ outputs.test_zscore.row.premium_incorrects == 0 }}"
+  - "{{ outputs.test_zscore.row.ordinaires_incorrects == 0 }}"
+
+  errorMessage: "Test du z-score échoué"
+
+- id: export_ca
+  type: io.kestra.plugin.scripts.python.Commands
+
+  taskRunner:
+    type: io.kestra.plugin.scripts.runner.docker.Docker
+
+  containerImage: python:3.12-slim
+
+  namespaceFiles:
+    enabled: true
+    include:
+    - python/export_revenue.py
+
+  inputFiles:
+    work/comptoir.duckdb: "{{ outputs.calcul_ca.databaseUri }}"
+
+  beforeCommands:
+  - python -m pip install --no-cache-dir duckdb==1.5.5 pandas==3.0.6 openpyxl==3.1.5
+
+  commands:
+  - cd "{{ workingDir }}" && python python/export_revenue.py
+
+  outputFiles:
+  - outputs/chiffre_affaires.xlsx
+
+  retry:
+    type: constant
+    interval: PT10S
+    maxAttempts: 3
+    maxDuration: PT1M
+    warningOnRetry: true
+
+triggers:
+- id: lancement_mensuel
+  type: io.kestra.plugin.core.trigger.Schedule
+  cron: "0 9 15 * *"
+  timezone: Europe/Paris
+
+#gestion des erreurs
+
+errors:
+- id: journal_erreur
+  type: io.kestra.plugin.core.log.Log
+
+  message: |
+    Échec du pipeline {{ flow.namespace }}.{{ flow.id }}
+    Execution : {{ execution.id }}
+    Erreur : {{ errorLogs() }}

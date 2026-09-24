@@ -3,7 +3,6 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-
 DB_PATH = "work/comptoir.duckdb"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_FILE = OUTPUT_DIR / "chiffre_affaires.xlsx"
