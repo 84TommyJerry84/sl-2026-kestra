@@ -3,67 +3,100 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-# connexion avec à duckdb
 
-con = duckdb.connect("work/comptoir.duckdb")
+DB_PATH = "work/comptoir.duckdb"
+OUTPUT_DIR = Path("outputs")
 
-# recuperation de la data mergée
 
-df = con.execute(
+def charger_donnees(con):
+    """Charge les données fusionnées depuis DuckDB."""
+    query = """
+        SELECT
+            product_id,
+            onsale_web,
+            price,
+            stock_quantity,
+            stock_status,
+            id_web,
+            sku,
+            post_type,
+            post_title,
+            total_sales
+        FROM merged_data
     """
-    SELECT *
-    FROM merged_data
-    """
-).df()
 
-# cast du prix en nombre
+    return con.execute(query).df()
 
 
-df["price"] = pd.to_numeric(df["price"])
+def calculer_zscore(df):
+    """Calcule le z-score du prix pour chaque produit."""
+    df = df.copy()
+
+    df["price"] = pd.to_numeric(df["price"])
+
+    moyenne_prix = df["price"].mean()
+    ecart_type_prix = df["price"].std(ddof=0)
+
+    df["zscore"] = (df["price"] - moyenne_prix) / ecart_type_prix
+
+    return df, moyenne_prix, ecart_type_prix
 
 
-# petits print histoire d'afficher les resultats
+def separer_vins(df):
+    """Sépare les vins premium des vins ordinaires."""
+    premium = df[df["zscore"] > 2].copy()
+    ordinaire = df[df["zscore"] <= 2].copy()
 
-print("Nombre de lignes :", len(df))
-print("Type de price :", df["price"].dtype)
-print(df[["product_id", "price", "post_title"]].head())
+    return premium, ordinaire
 
-# moyenne et ecart type
 
-moyenne_prix = df["price"].mean()
-ecart_type_prix = df["price"].std(ddof=0)
+def exporter_csv(premium, ordinaire):
+    """Exporte les deux catégories de vins au format CSV."""
+    OUTPUT_DIR.mkdir(exist_ok=True)
 
-# affichage des deux valeurs calculées
-print("Moyenne des prix :", moyenne_prix)
-print("Écart-type des prix :", ecart_type_prix)
+    premium.to_csv(
+        OUTPUT_DIR / "vins_premium.csv",
+        index=False,
+    )
 
-# calcul du zscore comme dans le brief
-df["zscore"] = (df["price"] - moyenne_prix) / ecart_type_prix
+    ordinaire.to_csv(
+        OUTPUT_DIR / "vins_ordinaires.csv",
+        index=False,
+    )
 
-print(
-    df[["product_id", "price", "zscore", "post_title"]]
-    .sort_values("zscore", ascending=False)
-    .head(30)
-)
-# tri sort et affichage
-premium = df[df["zscore"] > 2].copy()
-ordinaire = df[df["zscore"] <= 2].copy()
 
-print("Nombre de vins premium :", len(premium))
-print("Nombre de vins ordinaires :", len(ordinaire))
-print("Total :", len(premium) + len(ordinaire))
+def main():
+    con = duckdb.connect(DB_PATH)
 
-# export des resultats en fichiers csv
+    try:
+        df = charger_donnees(con)
 
-# création du dossier de sortie ou cas ou il est apsss là
-Path("outputs").mkdir(exist_ok=True)
+        df, moyenne_prix, ecart_type_prix = calculer_zscore(df)
 
-# export des deux catégories
-premium.to_csv("outputs/vins_premium.csv", index=False)
-ordinaire.to_csv("outputs/vins_ordinaires.csv", index=False)
+        premium, ordinaire = separer_vins(df)
 
-# print pour voir si les exports se sont bien faits
-print("Fichier premium créé :", len(premium), "lignes")
-print("Fichier ordinaire créé :", len(ordinaire), "lignes")
+        print("Nombre de lignes :", len(df))
+        print("Moyenne des prix :", moyenne_prix)
+        print("Écart-type des prix :", ecart_type_prix)
 
-con.close()
+        print(
+            df[["product_id", "price", "zscore", "post_title"]]
+            .sort_values("zscore", ascending=False)
+            .head(50)
+        )
+
+        print("Nombre de vins premium :", len(premium))
+        print("Nombre de vins ordinaires :", len(ordinaire))
+        print("Total :", len(premium) + len(ordinaire))
+
+        exporter_csv(premium, ordinaire)
+
+        print("Fichier premium créé :", len(premium), "lignes")
+        print("Fichier ordinaire créé :", len(ordinaire), "lignes")
+
+    finally:
+        con.close()
+
+
+if __name__ == "__main__":
+    main()
