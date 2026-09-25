@@ -333,13 +333,13 @@ Le dossier `docs/` regroupe notamment :
 
 ## Suivi OpenProject
 
-Le suivi du projet a été réalisé dans OpenProject avec un backlog et un tableau Kanban.
+Le suivi du projet a été réalisé avec OpenProject : backlog, Kanban, planification des tâches et suivi de l'avancement.
 
-Projet local :
+Une exportation du suivi final est disponible dans le dépôt :
 
-[Comptoir des Coteaux - Pipeline Kestra](http://localhost:8080/projects/comptoir-des-coteaux-pipeline-kestra/work_packages)
+[Consulter le suivi OpenProject au format PDF](docs/openproject_suivi.pdf)
 
-> Ce lien OpenProject est local et nécessite que l'instance OpenProject correspondante soit démarrée sur la machine.
+L'instance OpenProject utilisée pendant le projet a été auto-hébergée avec Docker.
 
 ## Sécurité
 
