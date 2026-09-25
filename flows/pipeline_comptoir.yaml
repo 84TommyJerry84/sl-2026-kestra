@@ -225,6 +225,18 @@ tasks:
     maxDuration: PT1M
     warningOnRetry: true
 
+- id: branches_vins
+  type: io.kestra.plugin.core.flow.Parallel
+
+  tasks:
+  - id: branche_premium
+    type: io.kestra.plugin.core.log.Log
+    message: "Branche premium : fichier vins_premium.csv généré"
+
+  - id: branche_ordinaires
+    type: io.kestra.plugin.core.log.Log
+    message: "Branche ordinaires : fichier vins_ordinaires.csv généré"
+
 #test5 check du zscore
 
 - id: test_zscore
