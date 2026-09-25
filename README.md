@@ -337,7 +337,7 @@ Le suivi du projet a été réalisé avec OpenProject : backlog, Kanban, planifi
 
 Une exportation du suivi final est disponible dans le dépôt :
 
-[Consulter le suivi OpenProject au format PDF](docs/openproject_suivi.pdf)
+[Consulter le suivi OpenProject au format PDF](docs/rapport_openproject.pdf)
 
 L'instance OpenProject utilisée pendant le projet a été auto-hébergée avec Docker.
 
