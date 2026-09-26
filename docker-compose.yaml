@@ -46,6 +46,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/kestra-wd:/tmp/kestra-wd
 
+      # Données métier gérées par l'humain.
+      # Lecture seule pour éviter qu'un flow modifie les sources.
+      - ./data:/project/data:ro
+
+      # Livrables réellement écrits sur le poste hôte.
+      - ./outputs:/project/outputs
+
     environment:
       KESTRA_CONFIGURATION: |
         datasources:
@@ -78,6 +85,35 @@ services:
 
           url: http://localhost:8082/
 
+          # Autorise les URI file:/// vers les répertoires montés.
+          local-files:
+            allowed-paths:
+              - /project/data
+              - /project/outputs
+
+          # Autorisations propres au plugin Local Files.
+          plugins:
+            configurations:
+              - type: io.kestra.plugin.fs.local.Downloads
+                values:
+                  allowed-paths:
+                    - /project/data
+
+              - type: io.kestra.plugin.fs.local.Download
+                values:
+                  allowed-paths:
+                    - /project/data
+
+              - type: io.kestra.plugin.fs.local.Uploads
+                values:
+                  allowed-paths:
+                    - /project/outputs
+
+              - type: io.kestra.plugin.fs.local.Upload
+                values:
+                  allowed-paths:
+                    - /project/outputs
+
     ports:
       - "8082:8080"
 
@@ -101,7 +137,6 @@ services:
 
     volumes:
       - ./flows:/project/flows:ro
-      - ./data:/project/data:ro
       - ./sql:/project/sql:ro
       - ./python:/project/python:ro
 
@@ -124,12 +159,6 @@ services:
         echo "Déploiement du flow..."
         kestractl flows deploy /project/flows \
           --namespace comptoir.coteaux \
-          --override \
-          --fail-fast
-
-        echo "Import des données..."
-        kestractl nsfiles upload comptoir.coteaux /project/data data \
-          --no-root \
           --override \
           --fail-fast
 

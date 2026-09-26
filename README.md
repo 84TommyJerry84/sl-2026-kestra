@@ -2,30 +2,66 @@
 
 ## Contexte
 
-Le Comptoir des Coteaux souhaite automatiser un traitement réalisé chaque mois à partir de trois fichiers issus de l'ERP, du site Web et d'une table de liaison.
+Le Comptoir des Coteaux souhaite automatiser un traitement mensuel réalisé à partir de trois sources :
 
-Le pipeline nettoie et dédoublonne les données, rapproche les produits ERP avec les ventes Web, calcule le chiffre d'affaires par produit et le chiffre d'affaires total, puis classe les vins selon leur z-score.
+- un fichier ERP ;
+- un fichier Web ;
+- un fichier de liaison entre les identifiants ERP et Web.
 
-L'orchestration est réalisée avec **Kestra**. Les traitements de données sont effectués avec **DuckDB en SQL** et la partie statistique avec **Python et pandas**.
+Le pipeline :
 
-Le pipeline produit un rapport Excel du chiffre d'affaires ainsi que deux fichiers CSV contenant les vins premium et les vins ordinaires.
+1. identifie automatiquement les trois sources ;
+2. vérifie leur structure ;
+3. prépare les données ;
+4. nettoie et dédoublonne les données avec DuckDB ;
+5. rapproche les produits ERP avec les ventes Web ;
+6. calcule le chiffre d'affaires par produit et le chiffre d'affaires total ;
+7. calcule un z-score sur les prix ;
+8. sépare les vins premium et ordinaires ;
+9. exécute plusieurs contrôles de cohérence ;
+10. publie les livrables dans le dossier local `outputs/`.
 
-Une exécution automatique est prévue le **15 de chaque mois à 9 h, heure de Paris**.
+L'orchestration est réalisée avec **Kestra**.
+
+La logique de traitement reste dans les scripts **SQL** et **Python**.
+
+Une exécution automatique est planifiée le **15 de chaque mois à 09:00, heure de Paris**.
+
+---
 
 ## Architecture
 
 Les principaux outils utilisés sont :
 
-- **Kestra** : orchestration, planification et gestion des erreurs ;
+- **Kestra** : orchestration, planification, assertions et gestion des erreurs ;
 - **DuckDB** : nettoyage, dédoublonnage, jointure et calcul du chiffre d'affaires ;
-- **Python / pandas** : calcul du z-score et séparation des vins ;
-- **openpyxl** : génération du rapport Excel ;
+- **Python / pandas** : préparation des sources et calcul du z-score ;
+- **openpyxl** : lecture des fichiers XLSX et génération du rapport Excel ;
 - **PostgreSQL** : stockage interne utilisé par Kestra ;
-- **Docker Compose** : lancement reproductible de l'environnement ;
+- **Docker Compose** : exécution reproductible de l'environnement ;
+- **PowerShell** : lancement simplifié avec `run.ps1` ;
 - **Git / GitHub** : versionnement du projet ;
 - **OpenProject** : suivi du backlog et du Kanban.
 
-Kestra orchestre les traitements mais la logique métier reste dans les scripts SQL et Python.
+Le principe retenu est le suivant :
+
+```text
+data/
+  ↓
+Kestra
+  ↓
+Python : identification et préparation des sources
+  ↓
+DuckDB : nettoyage / dédoublonnage / fusion / CA
+  ↓
+Python : z-score
+  ↓
+Contrôles dynamiques
+  ↓
+outputs/
+```
+
+---
 
 ## Structure du dépôt
 
@@ -35,53 +71,156 @@ sl-2026-kestra/
 │   ├── Fichier_erp.xlsx
 │   ├── Fichier_web.xlsx
 │   └── fichier_liaison.xlsx
+│
 ├── docs/
-│   ├── note_cadrage.md
-│   ├── logigramme_pipeline.drawio
+│   ├── rapport_openproject.pdf
 │   └── ...
+│
 ├── flows/
 │   └── pipeline_comptoir.yaml
+│
 ├── outputs/
 │   ├── chiffre_affaires.xlsx
 │   ├── vins_premium.csv
 │   └── vins_ordinaires.csv
+│
 ├── python/
+│   ├── prepare_sources.py
 │   ├── export_revenue.py
 │   └── zscore.py
+│
 ├── sql/
 │   ├── etape1_clean.sql
 │   ├── etape2_deduplicate.sql
 │   ├── etape3_merge.sql
 │   └── etape4_cal_revenue.sql
+│
 ├── .env.example
 ├── .gitignore
 ├── docker-compose.yaml
 ├── requirements.txt
+├── run.ps1
 ├── carto_data.ipynb
 └── README.md
 ```
 
+---
+
+## Gestion des fichiers sources
+
+Les fichiers métier sont déposés par l'utilisateur dans :
+
+```text
+data/
+```
+
+Le dossier doit contenir exactement trois sources :
+
+- ERP ;
+- liaison ;
+- Web.
+
+Les fichiers peuvent être :
+
+```text
+.csv
+.xlsx
+```
+
+Les noms de fichiers ne sont pas utilisés pour déterminer leur rôle.
+
+Le script :
+
+```text
+python/prepare_sources.py
+```
+
+identifie chaque source à partir de ses colonnes.
+
+### Colonnes attendues
+
+#### ERP
+
+```text
+product_id
+onsale_web
+price
+stock_quantity
+stock_status
+```
+
+#### Liaison
+
+```text
+product_id
+id_web
+```
+
+#### Web
+
+```text
+sku
+post_type
+post_title
+total_sales
+```
+
+Les colonnes supplémentaires sont autorisées et ignorées lorsqu'elles ne sont pas utiles au pipeline.
+
+Par exemple, le fichier Web de référence contient de nombreuses colonnes supplémentaires sans empêcher son traitement.
+
+Après identification, Python produit trois fichiers normalisés :
+
+```text
+prepared/erp.csv
+prepared/liaison.csv
+prepared/web.csv
+```
+
+utilisés ensuite par DuckDB.
+
+---
+
+## Gestion des valeurs absentes
+
+La présence d'une colonne dans le schéma est obligatoire, mais certaines valeurs peuvent légitimement être absentes.
+
+Par exemple :
+
+- une ligne de liaison peut ne pas avoir de `id_web` si le produit ERP n'a pas de correspondance Web ;
+- une ligne Web de type `product` peut ne pas avoir de `sku` et être non joignable.
+
+Ces lignes sont comptabilisées dans les contrôles mais ne provoquent pas automatiquement un échec lorsqu'elles sont simplement non exploitables pour la jointure.
+
+En revanche, les champs nécessaires sur les enregistrements réellement exploitables restent contrôlés.
+
+---
+
 ## Prérequis
 
-Pour relancer le pipeline :
+Pour exécuter le projet :
 
+- Windows avec PowerShell ;
 - Docker Desktop ;
 - Docker Compose ;
-- Git ;
-- un navigateur Web.
+- Git.
 
 Versions utilisées pendant le développement :
 
-- Docker 29.7.2 ;
-- Docker Compose v5.4.0 ;
-- Kestra 2.0.3 ;
-- kestractl 2.1.0 ;
-- PostgreSQL 18 ;
-- Python 3.12 pour les tâches Python du pipeline.
+- Kestra `2.0.3` ;
+- kestractl `2.1.0` ;
+- PostgreSQL `18` ;
+- Python `3.12` dans les tâches du pipeline.
 
-Les dépendances Python du projet sont également figées dans `requirements.txt`.
+Les dépendances Python sont également décrites dans :
 
-## Installation et lancement
+```text
+requirements.txt
+```
+
+---
+
+## Installation
 
 ### 1. Cloner le dépôt
 
@@ -90,133 +229,267 @@ git clone https://github.com/84TommyJerry84/sl-2026-kestra.git
 cd sl-2026-kestra
 ```
 
-### 2. Créer le fichier d'environnement
-
-Copier le fichier d'exemple :
+### 2. Créer le fichier `.env`
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Puis renseigner dans `.env` les mots de passe souhaités :
+Puis renseigner les variables nécessaires dans `.env`.
+
+Exemple :
 
 ```env
 POSTGRES_PASSWORD=...
-KESTRA_USERNAME=admin@kestra.io
+KESTRA_USERNAME=...
 KESTRA_PASSWORD=...
 ```
 
-Le fichier `.env` contient les secrets locaux et n'est pas versionné dans Git.
+Le fichier `.env` contient les secrets locaux et n'est pas versionné.
 
-### 3. Lancer l'environnement
+---
 
-Depuis la racine du dépôt :
+## Lancement recommandé
+
+Le moyen le plus simple d'exécuter tout le projet est :
+
+```powershell
+.\run.ps1
+```
+
+Le script réalise automatiquement les étapes suivantes :
+
+```text
+vérification des sources
+        ↓
+vérification de Docker
+        ↓
+démarrage PostgreSQL + Kestra
+        ↓
+redéploiement du flow
+        ↓
+import des scripts SQL
+        ↓
+import des scripts Python
+        ↓
+lancement du pipeline Kestra
+        ↓
+attente de la fin de l'exécution
+        ↓
+vérification du statut SUCCESS
+        ↓
+vérification des 3 livrables
+```
+
+Une exécution correcte se termine par :
+
+```text
+========================================
+ PIPELINE TERMINE AVEC SUCCES
+========================================
+```
+
+Le script ne supprime pas les volumes Docker existants.
+
+---
+
+## Démarrage manuel de l'environnement
+
+Il est également possible de démarrer les services manuellement :
 
 ```powershell
 docker compose up -d
 ```
 
-Docker Compose démarre trois services :
+Les principaux services sont :
 
-- `postgres` : base utilisée par Kestra ;
-- `kestra` : serveur d'orchestration ;
-- `kestra-init` : initialisation automatique du projet.
+- `postgres` ;
+- `kestra` ;
+- `kestra-init`.
 
-Vérifier leur état :
+`kestra-init` est un conteneur ponctuel.
+
+Lorsqu'il a terminé correctement :
+
+```text
+kestra-init    Exited (0)
+```
+
+Cela signifie que le flow et les fichiers nécessaires ont été déployés avec succès.
+
+Vérification :
 
 ```powershell
 docker compose ps -a
 ```
 
-Après l'initialisation, le résultat attendu est notamment :
-
-```text
-kestra           Up
-postgres         Up (healthy)
-kestra-init      Exited (0)
-```
-
-`kestra-init` est un conteneur ponctuel : le statut `Exited (0)` indique que son travail s'est terminé correctement.
-
-Les logs peuvent être consultés avec :
+Logs :
 
 ```powershell
 docker compose logs kestra-init
 ```
 
-## Initialisation automatique de Kestra
+---
 
-Lors du premier démarrage, `kestra-init` :
+## Initialisation Kestra
+
+`kestra-init` :
 
 1. attend que Kestra soit disponible ;
-2. déploie automatiquement `flows/pipeline_comptoir.yaml` ;
-3. importe les trois fichiers sources dans les Namespace Files ;
-4. importe les quatre scripts SQL ;
-5. importe les deux scripts Python.
+2. déploie `flows/pipeline_comptoir.yaml` ;
+3. importe les quatre scripts SQL ;
+4. importe les trois scripts Python.
 
-Le namespace utilisé est :
+Les données métier du dossier `data/` ne sont pas copiées dans les Namespace Files.
+
+Le dossier local est monté dans le conteneur Kestra et lu lors de chaque exécution.
+
+Cela permet à l'utilisateur de remplacer les trois sources par les fichiers du mois suivant sans reconstruire l'image Docker.
+
+Namespace :
 
 ```text
 comptoir.coteaux
 ```
 
-et le flow :
+Flow :
 
 ```text
 pipeline_comptoir
 ```
 
-Aucun import manuel du flow ou des Namespace Files n'est nécessaire.
+---
 
-L'interface Kestra est accessible à l'adresse :
+## Interface Kestra
 
-[http://localhost:8082](http://localhost:8082)
-
-La connexion s'effectue avec `KESTRA_USERNAME` et `KESTRA_PASSWORD` définis dans le fichier `.env`.
-
-## Exécuter le pipeline
-
-Dans l'interface Kestra :
-
-1. ouvrir **Flows** ;
-2. ouvrir le namespace `comptoir.coteaux` ;
-3. sélectionner `pipeline_comptoir` ;
-4. lancer une exécution avec **Execute** ;
-5. vérifier que l'exécution se termine avec le statut `SUCCESS`.
-
-Le pipeline suit principalement cet enchaînement :
+L'interface est accessible à :
 
 ```text
-Sources ERP / Web / liaison
+http://localhost:8082
+```
+
+Une exécution manuelle peut être lancée depuis :
+
+```text
+Flows
+→ comptoir.coteaux
+→ pipeline_comptoir
+→ Execute
+```
+
+Le résultat attendu est :
+
+```text
+SUCCESS
+```
+
+---
+
+## Enchaînement du pipeline
+
+```text
+Lecture de data/
         ↓
-Nettoyage
+Identification ERP / liaison / Web
         ↓
-Test des valeurs manquantes
+Conversion en CSV normalisés
+        ↓
+Nettoyage DuckDB
+        ↓
+Contrôle des valeurs manquantes
         ↓
 Dédoublonnage
         ↓
-Test des doublons
+Contrôle des doublons
         ↓
 Fusion ERP / liaison / Web
         ↓
-Test de la jointure
+Contrôle de la jointure
         ↓
 Calcul du chiffre d'affaires
         ↓
-Test du chiffre d'affaires
+Contrôle du chiffre d'affaires
         ↓
 Calcul du z-score
         ↓
-Test du z-score
+Contrôle du z-score
         ↓
-Exports
+Export Excel
+        ↓
+Publication dans outputs/
 ```
 
-Chaque contrôle métier est suivi d'une assertion Kestra. Si une assertion échoue, l'exécution passe en erreur.
+---
+
+## Tests intégrés
+
+Le pipeline ne dépend pas de valeurs fixes propres à un mois donné.
+
+Les contrôles de production sont dynamiques.
+
+### Valeurs manquantes
+
+Contrôle des champs nécessaires sur les lignes métier exploitables.
+
+### Doublons
+
+Vérification de l'unicité des clés après dédoublonnage.
+
+### Jointure
+
+Vérification notamment :
+
+- de la présence de lignes fusionnées ;
+- de l'unicité des `product_id` ;
+- de l'unicité des `sku` ;
+- de la cohérence entre `id_web` et `sku`.
+
+### Chiffre d'affaires
+
+Pour chaque ligne :
+
+```text
+chiffre_affaires = price × total_sales
+```
+
+Le pipeline vérifie également que le chiffre d'affaires global correspond à la somme des chiffres d'affaires par produit.
+
+### Z-score
+
+Le z-score est calculé avec :
+
+```text
+z = (prix - moyenne des prix) / écart-type
+```
+
+Classification :
+
+```text
+z > 2     → premium
+z <= 2    → ordinaire
+```
+
+Le pipeline contrôle :
+
+- la cohérence du z-score ;
+- la cohérence de la classification ;
+- l'absence de perte de lignes pendant la séparation.
+
+---
+
+## Retry et gestion des erreurs
+
+Les principales tâches Python disposent d'un mécanisme de retry.
+
+En cas d'échec, Kestra journalise l'erreur et l'exécution se termine avec un statut `FAILED`.
+
+Avec `run.ps1`, les logs d'erreur Kestra sont affichés automatiquement si l'exécution échoue.
+
+---
 
 ## Planification automatique
 
-Le workflow contient un trigger :
+Le flow contient le trigger suivant :
 
 ```yaml
 triggers:
@@ -226,43 +499,27 @@ triggers:
     timezone: Europe/Paris
 ```
 
-Le pipeline est donc déclenché automatiquement le **15 de chaque mois à 9 h**.
+Le pipeline est donc exécuté automatiquement :
 
-## Tests intégrés
+```text
+le 15 de chaque mois
+à 09:00
+timezone Europe/Paris
+```
 
-Cinq familles de contrôles sont intégrées au workflow :
+Il reste également exécutable manuellement.
 
-- valeurs manquantes après nettoyage ;
-- doublons après dédoublonnage ;
-- cohérence de la jointure ERP / liaison / Web ;
-- cohérence du chiffre d'affaires ;
-- cohérence de la classification par z-score.
+---
 
-Les tâches Python disposent également d'un mécanisme de retry avec un maximum de trois tentatives.
+## Livrables
 
-Un gestionnaire global journalise les erreurs lorsqu'une exécution échoue.
+Le pipeline publie réellement les fichiers dans le dossier local :
 
-Les mécanismes d'erreur et de retry ont été testés volontairement en provoquant l'échec d'une tâche.
+```text
+outputs/
+```
 
-## Résultats obtenus
-
-Les résultats ont été comparés aux valeurs de référence fournies par Octave.
-
-| Contrôle | Référence Octave | Résultat obtenu |
-| --- | ---: | ---: |
-| ERP après dédoublonnage | 825 lignes | 825 lignes |
-| Liaison après dédoublonnage | 825 lignes | 825 lignes |
-| Web après nettoyage | 1 428 lignes | 1 428 lignes |
-| Web après dédoublonnage | 714 lignes | 714 lignes |
-| Fichier fusionné | 714 lignes | 714 lignes |
-| Chiffre d'affaires total | 70 568,60 € | 70 568,60 € |
-| Vins premium (`z > 2`) | 30 | 30 |
-
-Les résultats obtenus correspondent donc aux valeurs de référence fournies dans le brief.
-
-## Fichiers produits
-
-Le pipeline produit :
+avec :
 
 ```text
 outputs/chiffre_affaires.xlsx
@@ -270,81 +527,179 @@ outputs/vins_premium.csv
 outputs/vins_ordinaires.csv
 ```
 
-Résultats finaux :
+### `chiffre_affaires.xlsx`
 
-- `chiffre_affaires.xlsx` : 714 produits, chiffre d'affaires total de **70 568,60 €** ;
-- `vins_premium.csv` : **30 vins premium** ;
-- `vins_ordinaires.csv` : **684 vins ordinaires**.
-
-Les fichiers générés lors d'une exécution sont également disponibles dans les outputs des tâches Kestra correspondantes.
-
-## Reproductibilité
-
-La procédure Docker Compose a été testée avec des volumes Docker entièrement neufs afin de simuler une installation vierge.
-
-À partir du dépôt et d'un fichier `.env`, la commande :
-
-```powershell
-docker compose up -d
-```
-
-a permis de :
+Contient deux feuilles :
 
 ```text
-créer PostgreSQL
-→ démarrer Kestra
-→ déployer automatiquement le flow
-→ importer les données
-→ importer les scripts SQL
-→ importer les scripts Python
-→ exécuter le pipeline
-→ SUCCESS
+CA_par_produit
+CA_total
 ```
 
-Lors de ce test sur une installation vierge, toutes les tâches du pipeline se sont exécutées avec succès.
+### `vins_premium.csv`
 
-## Arrêter le projet
+Contient les produits dont :
 
-Pour arrêter les conteneurs tout en conservant les données :
+```text
+zscore > 2
+```
+
+### `vins_ordinaires.csv`
+
+Contient les produits dont :
+
+```text
+zscore <= 2
+```
+
+---
+
+## Validation sur plusieurs jeux de données
+
+Le pipeline a été testé avec deux jeux différents afin de vérifier qu'il ne dépend pas de valeurs codées en dur.
+
+### Jeu de test CSV
+
+Résultats :
+
+| Contrôle | Résultat |
+|---|---:|
+| Produits fusionnés | 48 |
+| Chiffre d'affaires total | 5 443,70 € |
+| Vins premium | 3 |
+| Vins ordinaires | 45 |
+
+Le pipeline s'est terminé avec :
+
+```text
+SUCCESS
+```
+
+### Jeu de référence Octave XLSX
+
+Résultats :
+
+| Contrôle | Résultat |
+|---|---:|
+| Produits fusionnés | 714 |
+| Chiffre d'affaires total | 70 568,60 € |
+| Vins premium | 30 |
+| Vins ordinaires | 684 |
+| Liaisons sans `id_web` | 91 |
+| Produits Web sans `sku` | 2 |
+
+Le pipeline s'est également terminé avec :
+
+```text
+SUCCESS
+```
+
+Les valeurs :
+
+```text
+714
+70 568,60 €
+30
+684
+```
+
+sont utilisées comme valeurs de référence pour le jeu Octave uniquement.
+
+Elles ne sont pas codées comme assertions dans le pipeline de production.
+
+---
+
+## Formats testés
+
+Le pipeline a été validé avec :
+
+```text
+CSV
+XLSX
+```
+
+Les fichiers peuvent porter des noms différents, car les sources sont identifiées par leur schéma et non par leur nom.
+
+---
+
+## Arrêter l'environnement
+
+Pour arrêter les conteneurs tout en conservant les volumes :
 
 ```powershell
 docker compose down
 ```
 
-Les volumes Docker sont conservés.
+Les données persistantes sont conservées.
 
-Pour supprimer également les volumes :
+La commande suivante supprimerait également les volumes :
 
 ```powershell
 docker compose down -v
 ```
 
-Cette seconde commande supprime les données persistées par PostgreSQL et Kestra.
+Elle n'est pas nécessaire pour une utilisation normale du projet.
+
+---
 
 ## Documentation
 
-Le dossier `docs/` regroupe notamment :
+Le dossier `docs/` contient notamment :
 
-- la note de cadrage ;
-- le logigramme au format Draw.io ;
-- l'image du logigramme ;
-- les captures d'écran de Kestra ;
-- les captures liées aux tests et à la gestion des erreurs.
+- les documents de cadrage ;
+- les diagrammes du pipeline ;
+- les captures d'écran ;
+- la documentation du suivi du projet ;
+- le rapport OpenProject.
 
-## Suivi OpenProject
+Le suivi OpenProject est disponible dans :
 
-Le suivi du projet a été réalisé avec OpenProject : backlog, Kanban, planification des tâches et suivi de l'avancement.
+```text
+docs/rapport_openproject.pdf
+```
 
-Une exportation du suivi final est disponible dans le dépôt :
-
-[Consulter le suivi OpenProject au format PDF](docs/rapport_openproject.pdf)
-
-L'instance OpenProject utilisée pendant le projet a été auto-hébergée avec Docker.
+---
 
 ## Sécurité
 
-Les mots de passe ne sont pas stockés dans le dépôt.
+Les secrets locaux sont placés dans :
 
-Le fichier `.env` est exclu par `.gitignore`.
+```text
+.env
+```
 
-Seul `.env.example`, contenant des valeurs d'exemple, est versionné.
+Ce fichier est exclu du dépôt Git.
+
+Le dépôt versionne uniquement :
+
+```text
+.env.example
+```
+
+qui sert de modèle de configuration.
+
+---
+
+## Résumé d'utilisation
+
+Pour une utilisation mensuelle :
+
+1. déposer les trois nouvelles sources CSV ou XLSX dans `data/` ;
+2. vérifier qu'il n'y a que trois sources métier dans ce dossier ;
+3. lancer :
+
+```powershell
+.\run.ps1
+```
+
+4. attendre :
+
+```text
+PIPELINE TERMINE AVEC SUCCES
+```
+
+5. récupérer les résultats dans :
+
+```text
+outputs/
+```

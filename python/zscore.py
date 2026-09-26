@@ -3,7 +3,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-DB_PATH = "work/comptoir.duckdb"
+DB_PATH = Path("work/comptoir.duckdb")
 OUTPUT_DIR = Path("outputs")
 
 
@@ -31,12 +31,31 @@ def calculer_zscore(df):
     """Calcule le z-score du prix pour chaque produit."""
     df = df.copy()
 
-    df["price"] = pd.to_numeric(df["price"])
+    try:
+        df["price"] = pd.to_numeric(df["price"], errors="raise")
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            "La colonne 'price' contient au moins une valeur non numérique."
+        ) from exc
+
+    if df["price"].isna().any():
+        raise ValueError("La colonne 'price' contient au moins une valeur manquante.")
+
+    if df.empty:
+        raise ValueError("Impossible de calculer le z-score : aucune ligne fusionnée.")
 
     moyenne_prix = df["price"].mean()
     ecart_type_prix = df["price"].std(ddof=0)
 
-    df["zscore"] = (df["price"] - moyenne_prix) / ecart_type_prix
+    # Cas valide : tous les produits ont exactement le même prix.
+    # Leur distance à la moyenne est donc nulle.
+    if ecart_type_prix == 0:
+        df["zscore"] = 0.0
+    else:
+        df["zscore"] = (df["price"] - moyenne_prix) / ecart_type_prix
+
+    if df["zscore"].isna().any():
+        raise ValueError("Le calcul du z-score a produit des valeurs manquantes.")
 
     return df, moyenne_prix, ecart_type_prix
 
@@ -46,26 +65,34 @@ def separer_vins(df):
     premium = df[df["zscore"] > 2].copy()
     ordinaire = df[df["zscore"] <= 2].copy()
 
+    if len(premium) + len(ordinaire) != len(df):
+        raise ValueError("La séparation premium/ordinaire a perdu des lignes.")
+
     return premium, ordinaire
 
 
 def exporter_csv(premium, ordinaire):
     """Exporte les deux catégories de vins au format CSV."""
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     premium.to_csv(
         OUTPUT_DIR / "vins_premium.csv",
         index=False,
+        encoding="utf-8",
     )
 
     ordinaire.to_csv(
         OUTPUT_DIR / "vins_ordinaires.csv",
         index=False,
+        encoding="utf-8",
     )
 
 
 def main():
-    con = duckdb.connect(DB_PATH)
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Base DuckDB introuvable : {DB_PATH}")
+
+    con = duckdb.connect(str(DB_PATH))
 
     try:
         df = charger_donnees(con)
@@ -77,21 +104,22 @@ def main():
         print("Nombre de lignes :", len(df))
         print("Moyenne des prix :", moyenne_prix)
         print("Écart-type des prix :", ecart_type_prix)
-
-        print(
-            df[["product_id", "price", "zscore", "post_title"]]
-            .sort_values("zscore", ascending=False)
-            .head(50)
-        )
-
         print("Nombre de vins premium :", len(premium))
         print("Nombre de vins ordinaires :", len(ordinaire))
         print("Total :", len(premium) + len(ordinaire))
 
         exporter_csv(premium, ordinaire)
 
-        print("Fichier premium créé :", len(premium), "lignes")
-        print("Fichier ordinaire créé :", len(ordinaire), "lignes")
+        print(
+            "Fichier premium créé :",
+            len(premium),
+            "lignes",
+        )
+        print(
+            "Fichier ordinaire créé :",
+            len(ordinaire),
+            "lignes",
+        )
 
     finally:
         con.close()
