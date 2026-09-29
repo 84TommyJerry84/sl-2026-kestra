@@ -17,509 +17,651 @@ description: |
 
   Les livrables sont écrits dans le dossier local outputs/.
 
+
 tasks:
 
-- id: charger_sources
-  type: io.kestra.plugin.fs.local.Downloads
+  # ============================================================
+  # 1 - CHARGEMENT DES SOURCES
+  # ============================================================
 
-  from: /project/data
-  regExp: "(?i).*\\.(csv|xlsx)$"
-  recursive: false
-  action: NONE
-  maxFiles: 25
+  - id: charger_sources
+    type: io.kestra.plugin.fs.local.Downloads
 
-- id: preparer_sources
-  type: io.kestra.plugin.scripts.python.Commands
+    from: /project/data
+    regExp: "(?i).*\\.(csv|xlsx)$"
+    recursive: false
+    action: NONE
+    maxFiles: 25
 
-  taskRunner:
-    type: io.kestra.plugin.scripts.runner.docker.Docker
 
-  containerImage: python:3.12-slim
+  # ============================================================
+  # 2 - IDENTIFICATION ET PREPARATION DES SOURCES
+  # ============================================================
 
-  namespaceFiles:
-    enabled: true
-    include:
-    - python/prepare_sources.py
+  - id: preparer_sources
+    type: io.kestra.plugin.scripts.python.Commands
 
-  inputFiles:
-    source_1: "{{ outputs.charger_sources.files[0].uri }}"
-    source_2: "{{ outputs.charger_sources.files[1].uri }}"
-    source_3: "{{ outputs.charger_sources.files[2].uri }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
 
-  beforeCommands:
-  - python -m pip install --no-cache-dir pandas==3.0.6 openpyxl==3.1.5
+    containerImage: python:3.12-slim
 
-  commands:
-  - >
-    python python/prepare_sources.py --input-dir . --output-dir prepared
+    namespaceFiles:
+      enabled: true
+      include:
+        - python/prepare_sources.py
 
-  outputFiles:
-  - prepared/erp.csv
-  - prepared/liaison.csv
-  - prepared/web.csv
+    inputFiles:
+      source_1: "{{ outputs.charger_sources.files[0].uri }}"
+      source_2: "{{ outputs.charger_sources.files[1].uri }}"
+      source_3: "{{ outputs.charger_sources.files[2].uri }}"
 
-  retry:
-    type: constant
-    interval: PT10S
-    maxAttempts: 3
-    maxDuration: PT1M
-    warningOnRetry: true
+    beforeCommands:
+      - python -m pip install --no-cache-dir pandas==3.0.6 openpyxl==3.1.5
 
-- id: nettoyage_sources
-  type: io.kestra.plugin.jdbc.duckdb.Queries
+    commands:
+      - >
+        python python/prepare_sources.py
+        --input-dir .
+        --output-dir prepared
 
-  inputFiles:
-    prepared/erp.csv: "{{ outputs.preparer_sources.outputFiles['prepared/erp.csv'] }}"
-    prepared/liaison.csv: "{{ outputs.preparer_sources.outputFiles['prepared/liaison.csv'] }}"
-    prepared/web.csv: "{{ outputs.preparer_sources.outputFiles['prepared/web.csv'] }}"
+    outputFiles:
+      - prepared/erp.csv
+      - prepared/liaison.csv
+      - prepared/web.csv
 
-  sql: "{{ read('nsfile:///sql/etape1_clean.sql') }}"
+    retry:
+      type: constant
+      interval: PT10S
+      maxAttempts: 3
+      maxDuration: PT1M
+      warningOnRetry: true
 
-  outputDbFile: true
 
-- id: test_valeurs_manquantes
-  type: io.kestra.plugin.jdbc.duckdb.Query
+  # ============================================================
+  # 3 - NETTOYAGE
+  # ============================================================
 
-  databaseUri: "{{ outputs.nettoyage_sources.databaseUri }}"
+  - id: nettoyage_sources
+    type: io.kestra.plugin.jdbc.duckdb.Queries
 
-  sql: |
-    SELECT
-      (
-        SELECT COUNT(*)
-        FROM erp_clean
-        WHERE product_id IS NULL
-           OR onsale_web IS NULL
-           OR price IS NULL
-           OR stock_quantity IS NULL
-           OR stock_status IS NULL
-      ) AS valeurs_manquantes_erp,
+    inputFiles:
+      prepared/erp.csv: "{{ outputs.preparer_sources.outputFiles['prepared/erp.csv'] }}"
+      prepared/liaison.csv: "{{ outputs.preparer_sources.outputFiles['prepared/liaison.csv'] }}"
+      prepared/web.csv: "{{ outputs.preparer_sources.outputFiles['prepared/web.csv'] }}"
 
-      (
-        SELECT COUNT(*)
-        FROM liaison_clean
-        WHERE product_id IS NULL
-      ) AS valeurs_manquantes_liaison,
+    sql: "{{ read('nsfile:///sql/etape1_clean.sql') }}"
 
-      (
-        SELECT COUNT(*)
-        FROM web_clean
-        WHERE post_type = 'product'
-          AND sku IS NOT NULL
-          AND (
-               post_title IS NULL
-            OR total_sales IS NULL
-          )
-      ) AS valeurs_manquantes_web,
+    outputDbFile: true
 
-      (
-        SELECT COUNT(*)
-        FROM liaison_clean
-        WHERE id_web IS NULL
-      ) AS liaisons_sans_id_web,
 
-      (
-        SELECT COUNT(*)
-        FROM web_clean
-        WHERE post_type = 'product'
-          AND sku IS NULL
-      ) AS produits_web_sans_sku;
+  # ============================================================
+  # 4 - TEST DES VALEURS MANQUANTES
+  # ============================================================
 
-  fetchType: FETCH_ONE
+  - id: test_valeurs_manquantes
+    type: io.kestra.plugin.jdbc.duckdb.Query
 
-- id: assert_valeurs_manquantes
-  type: io.kestra.plugin.core.execution.Assert
+    databaseUri: "{{ outputs.nettoyage_sources.databaseUri }}"
 
-  conditions:
-  - "{{ outputs.test_valeurs_manquantes.row.valeurs_manquantes_erp == 0 }}"
-  - "{{ outputs.test_valeurs_manquantes.row.valeurs_manquantes_liaison == 0 }}"
-  - "{{ outputs.test_valeurs_manquantes.row.valeurs_manquantes_web == 0 }}"
+    sql: |
+      SELECT
 
-  errorMessage: |
-    Des valeurs obligatoires sont manquantes dans les enregistrements métier exploitables.
-
-- id: dedoublonnage
-  type: io.kestra.plugin.jdbc.duckdb.Queries
-
-  databaseUri: "{{ outputs.nettoyage_sources.databaseUri }}"
-
-  sql: "{{ read('nsfile:///sql/etape2_deduplicate.sql') }}"
-
-  outputDbFile: true
-
-- id: test_doublons
-  type: io.kestra.plugin.jdbc.duckdb.Query
-
-  databaseUri: "{{ outputs.dedoublonnage.databaseUri }}"
-
-  sql: |
-    SELECT
-      (
-        SELECT COUNT(*)
-        FROM (
-          SELECT product_id
-          FROM erp_dedup
-          GROUP BY product_id
-          HAVING COUNT(*) > 1
-        )
-      ) AS doublons_erp,
-
-      (
-        SELECT COUNT(*)
-        FROM (
-          SELECT product_id
-          FROM liaison_dedup
-          GROUP BY product_id
-          HAVING COUNT(*) > 1
-        )
-      ) AS doublons_liaison_product_id,
-
-      (
-        SELECT COUNT(*)
-        FROM (
-          SELECT id_web
-          FROM liaison_dedup
-          WHERE id_web IS NOT NULL
-          GROUP BY id_web
-          HAVING COUNT(*) > 1
-        )
-      ) AS doublons_liaison_id_web,
-
-      (
-        SELECT COUNT(*)
-        FROM (
-          SELECT sku
-          FROM web_dedup
-          WHERE sku IS NOT NULL
-          GROUP BY sku
-          HAVING COUNT(*) > 1
-        )
-      ) AS doublons_web;
-
-  fetchType: FETCH_ONE
-
-- id: assert_doublons
-  type: io.kestra.plugin.core.execution.Assert
-
-  conditions:
-  - "{{ outputs.test_doublons.row.doublons_erp == 0 }}"
-  - "{{ outputs.test_doublons.row.doublons_liaison_product_id == 0 }}"
-  - "{{ outputs.test_doublons.row.doublons_liaison_id_web == 0 }}"
-  - "{{ outputs.test_doublons.row.doublons_web == 0 }}"
-
-  errorMessage: |
-    Le dédoublonnage n'a pas produit des clés métier uniques.
-
-- id: fusion
-  type: io.kestra.plugin.jdbc.duckdb.Queries
-
-  databaseUri: "{{ outputs.dedoublonnage.databaseUri }}"
-
-  sql: "{{ read('nsfile:///sql/etape3_merge.sql') }}"
-
-  outputDbFile: true
-
-- id: test_jointure
-  type: io.kestra.plugin.jdbc.duckdb.Query
-
-  databaseUri: "{{ outputs.fusion.databaseUri }}"
-
-  sql: |
-    SELECT
-      COUNT(*) AS nb_lignes_fusion,
-
-      COUNT(DISTINCT product_id) AS nb_product_id_distincts,
-
-      COUNT(DISTINCT sku) AS nb_sku_distincts,
-
-      COUNT(*) FILTER (
-        WHERE CAST(id_web AS VARCHAR)
-           <> CAST(sku AS VARCHAR)
-      ) AS jointures_incoherentes
-
-    FROM merged_data;
-
-  fetchType: FETCH_ONE
-
-- id: assert_jointure
-  type: io.kestra.plugin.core.execution.Assert
-
-  conditions:
-  - "{{ outputs.test_jointure.row.nb_lignes_fusion > 0 }}"
-  - "{{ outputs.test_jointure.row.jointures_incoherentes == 0 }}"
-  - "{{ outputs.test_jointure.row.nb_lignes_fusion == outputs.test_jointure.row.nb_product_id_distincts }}"
-  - "{{ outputs.test_jointure.row.nb_lignes_fusion == outputs.test_jointure.row.nb_sku_distincts }}"
-
-  errorMessage: |
-    La jointure ERP / liaison / Web est incohérente :
-    clés non correspondantes ou multiplication de lignes détectée.
-
-- id: calcul_ca
-  type: io.kestra.plugin.jdbc.duckdb.Queries
-
-  databaseUri: "{{ outputs.fusion.databaseUri }}"
-
-  sql: "{{ read('nsfile:///sql/etape4_cal_revenue.sql') }}"
-
-  outputDbFile: true
-
-- id: test_ca
-  type: io.kestra.plugin.jdbc.duckdb.Query
-
-  databaseUri: "{{ outputs.calcul_ca.databaseUri }}"
-
-  sql: |
-    SELECT
-      COUNT(*) AS nb_lignes_ca,
-
-      COUNT(*) FILTER (
-        WHERE ABS(
-          CAST(chiffre_affaires AS DOUBLE)
-          -
-          (
-            CAST(price AS DOUBLE)
-            * CAST(total_sales AS DOUBLE)
-          )
-        ) > 0.005
-      ) AS lignes_ca_incoherentes,
-
-      ABS(
         (
-          SELECT CAST(chiffre_affaires_total AS DOUBLE)
-          FROM revenue_total
-        )
-        -
-        SUM(CAST(chiffre_affaires AS DOUBLE))
-      ) AS ecart_ca_total
+          SELECT COUNT(*)
+          FROM erp_clean
+          WHERE product_id IS NULL
+             OR onsale_web IS NULL
+             OR price IS NULL
+             OR stock_quantity IS NULL
+             OR stock_status IS NULL
+        ) AS valeurs_manquantes_erp,
 
-    FROM revenue_product;
+        (
+          SELECT COUNT(*)
+          FROM liaison_clean
+          WHERE product_id IS NULL
+        ) AS valeurs_manquantes_liaison,
 
-  fetchType: FETCH_ONE
+        (
+          SELECT COUNT(*)
+          FROM web_clean
+          WHERE post_type = 'product'
+            AND sku IS NOT NULL
+            AND (
+                 post_title IS NULL
+              OR total_sales IS NULL
+            )
+        ) AS valeurs_manquantes_web,
 
-- id: assert_ca
-  type: io.kestra.plugin.core.execution.Assert
+        (
+          SELECT COUNT(*)
+          FROM liaison_clean
+          WHERE id_web IS NULL
+        ) AS liaisons_sans_id_web;
 
-  conditions:
-  - "{{ outputs.test_ca.row.nb_lignes_ca == outputs.test_jointure.row.nb_lignes_fusion }}"
-  - "{{ outputs.test_ca.row.lignes_ca_incoherentes == 0 }}"
-  - "{{ outputs.test_ca.row.ecart_ca_total <= 0.005 }}"
+    fetchType: FETCH_ONE
 
-  errorMessage: |
-    Le chiffre d'affaires calculé est incohérent avec
-    prix × quantité vendue ou avec la somme globale.
 
-- id: calcul_zscore
-  type: io.kestra.plugin.scripts.python.Commands
+  - id: assert_valeurs_manquantes
+    type: io.kestra.plugin.core.execution.Assert
 
-  taskRunner:
-    type: io.kestra.plugin.scripts.runner.docker.Docker
+    conditions:
+      - "{{ outputs.test_valeurs_manquantes.row.valeurs_manquantes_erp == 0 }}"
+      - "{{ outputs.test_valeurs_manquantes.row.valeurs_manquantes_liaison == 0 }}"
+      - "{{ outputs.test_valeurs_manquantes.row.valeurs_manquantes_web == 0 }}"
 
-  containerImage: python:3.12-slim
+    errorMessage: |
+      Des valeurs obligatoires sont manquantes
+      dans les enregistrements métier exploitables.
 
-  namespaceFiles:
-    enabled: true
-    include:
-    - python/zscore.py
 
-  inputFiles:
-    work/comptoir.duckdb: "{{ outputs.calcul_ca.databaseUri }}"
+  # ============================================================
+  # 5 - DEDOUBLONNAGE
+  # ============================================================
 
-  beforeCommands:
-  - python -m pip install --no-cache-dir duckdb==1.5.5 pandas==3.0.6
+  - id: dedoublonnage
+    type: io.kestra.plugin.jdbc.duckdb.Queries
 
-  commands:
-  - >
-    python python/zscore.py
+    databaseUri: "{{ outputs.nettoyage_sources.databaseUri }}"
 
-  outputFiles:
-  - outputs/vins_premium.csv
-  - outputs/vins_ordinaires.csv
+    sql: "{{ read('nsfile:///sql/etape2_deduplicate.sql') }}"
 
-  retry:
-    type: constant
-    interval: PT10S
-    maxAttempts: 3
-    maxDuration: PT1M
-    warningOnRetry: true
+    outputDbFile: true
 
-- id: test_zscore
-  type: io.kestra.plugin.jdbc.duckdb.Query
 
-  databaseUri: "{{ outputs.calcul_ca.databaseUri }}"
+  # ============================================================
+  # 6 - TEST DES DOUBLONS
+  # ============================================================
 
-  inputFiles:
-    vins_premium.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_premium.csv'] }}"
-    vins_ordinaires.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_ordinaires.csv'] }}"
+  - id: test_doublons
+    type: io.kestra.plugin.jdbc.duckdb.Query
 
-  sql: |
-    WITH classifications AS (
+    databaseUri: "{{ outputs.dedoublonnage.databaseUri }}"
 
+    sql: |
       SELECT
-        *,
-        'premium' AS categorie
-      FROM read_csv_auto(
-        'vins_premium.csv',
-        header = true
-      )
 
-      UNION ALL BY NAME
+        (
+          SELECT COUNT(*)
+          FROM (
+            SELECT product_id
+            FROM erp_dedup
+            GROUP BY product_id
+            HAVING COUNT(*) > 1
+          )
+        ) AS doublons_erp,
 
+        (
+          SELECT COUNT(*)
+          FROM (
+            SELECT product_id
+            FROM liaison_dedup
+            GROUP BY product_id
+            HAVING COUNT(*) > 1
+          )
+        ) AS doublons_liaison_product_id,
+
+        (
+          SELECT COUNT(*)
+          FROM (
+            SELECT id_web
+            FROM liaison_dedup
+            WHERE id_web IS NOT NULL
+            GROUP BY id_web
+            HAVING COUNT(*) > 1
+          )
+        ) AS doublons_liaison_id_web,
+
+        (
+          SELECT COUNT(*)
+          FROM (
+            SELECT sku
+            FROM web_dedup
+            WHERE sku IS NOT NULL
+            GROUP BY sku
+            HAVING COUNT(*) > 1
+          )
+        ) AS doublons_web;
+
+    fetchType: FETCH_ONE
+
+
+  - id: assert_doublons
+    type: io.kestra.plugin.core.execution.Assert
+
+    conditions:
+      - "{{ outputs.test_doublons.row.doublons_erp == 0 }}"
+      - "{{ outputs.test_doublons.row.doublons_liaison_product_id == 0 }}"
+      - "{{ outputs.test_doublons.row.doublons_liaison_id_web == 0 }}"
+      - "{{ outputs.test_doublons.row.doublons_web == 0 }}"
+
+    errorMessage: |
+      Le dédoublonnage n'a pas produit
+      des clés métier uniques.
+
+
+  # ============================================================
+  # 7 - FUSION ERP + LIAISON + WEB
+  # ============================================================
+
+  - id: fusion
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+
+    databaseUri: "{{ outputs.dedoublonnage.databaseUri }}"
+
+    sql: "{{ read('nsfile:///sql/etape3_merge.sql') }}"
+
+    outputDbFile: true
+
+
+  # ============================================================
+  # 8 - TEST DE LA JOINTURE
+  # ============================================================
+
+  - id: test_jointure
+    type: io.kestra.plugin.jdbc.duckdb.Query
+
+    databaseUri: "{{ outputs.fusion.databaseUri }}"
+
+    sql: |
       SELECT
-        *,
-        'ordinaire' AS categorie
-      FROM read_csv_auto(
-        'vins_ordinaires.csv',
-        header = true
-      )
-    ),
 
-    statistiques AS (
-      SELECT
-        AVG(CAST(price AS DOUBLE)) AS moyenne_prix,
-        STDDEV_POP(CAST(price AS DOUBLE)) AS ecart_type_prix
-      FROM classifications
-    ),
+        COUNT(*) AS nb_lignes_fusion,
 
-    controle AS (
-      SELECT
-        COUNT(*) AS nb_classes,
+        COUNT(DISTINCT product_id)
+          AS nb_product_id_distincts,
+
+        COUNT(DISTINCT sku)
+          AS nb_sku_distincts,
 
         COUNT(*) FILTER (
-          WHERE categorie = 'premium'
-            AND CAST(zscore AS DOUBLE) <= 2
-        ) AS premium_incorrects,
+          WHERE CAST(id_web AS VARCHAR)
+             <> CAST(sku AS VARCHAR)
+        ) AS jointures_incoherentes
 
-        COUNT(*) FILTER (
-          WHERE categorie = 'ordinaire'
-            AND CAST(zscore AS DOUBLE) > 2
-        ) AS ordinaires_incorrects,
+      FROM merged_data;
+
+    fetchType: FETCH_ONE
+
+
+  - id: assert_jointure
+    type: io.kestra.plugin.core.execution.Assert
+
+    conditions:
+      - "{{ outputs.test_jointure.row.nb_lignes_fusion > 0 }}"
+      - "{{ outputs.test_jointure.row.jointures_incoherentes == 0 }}"
+      - "{{ outputs.test_jointure.row.nb_lignes_fusion == outputs.test_jointure.row.nb_product_id_distincts }}"
+      - "{{ outputs.test_jointure.row.nb_lignes_fusion == outputs.test_jointure.row.nb_sku_distincts }}"
+
+    errorMessage: |
+      La jointure ERP / liaison / Web est incohérente :
+      clés non correspondantes ou multiplication
+      de lignes détectée.
+
+
+  # ============================================================
+  # 9 - CALCUL DU CHIFFRE D'AFFAIRES
+  # ============================================================
+
+  - id: calcul_ca
+    type: io.kestra.plugin.jdbc.duckdb.Queries
+
+    databaseUri: "{{ outputs.fusion.databaseUri }}"
+
+    sql: "{{ read('nsfile:///sql/etape4_cal_revenue.sql') }}"
+
+    outputDbFile: true
+
+
+  # ============================================================
+  # 10 - TEST DU CHIFFRE D'AFFAIRES
+  # ============================================================
+
+  - id: test_ca
+    type: io.kestra.plugin.jdbc.duckdb.Query
+
+    databaseUri: "{{ outputs.calcul_ca.databaseUri }}"
+
+    sql: |
+      SELECT
+
+        COUNT(*) AS nb_lignes_ca,
 
         COUNT(*) FILTER (
           WHERE ABS(
-            CAST(zscore AS DOUBLE)
+            CAST(chiffre_affaires AS DOUBLE)
             -
-            CASE
-              WHEN statistiques.ecart_type_prix = 0
-                THEN 0
-              ELSE
-                (
-                  CAST(price AS DOUBLE)
-                  - statistiques.moyenne_prix
-                )
-                / statistiques.ecart_type_prix
-            END
-          ) > 0.000000001
-        ) AS zscores_incorrects
+            (
+              CAST(price AS DOUBLE)
+              * CAST(total_sales AS DOUBLE)
+            )
+          ) > 0.005
+        ) AS lignes_ca_incoherentes,
 
-      FROM classifications
-      CROSS JOIN statistiques
-    )
+        ABS(
+          (
+            SELECT CAST(
+              chiffre_affaires_total AS DOUBLE
+            )
+            FROM revenue_total
+          )
+          -
+          SUM(
+            CAST(chiffre_affaires AS DOUBLE)
+          )
+        ) AS ecart_ca_total
 
-    SELECT
-      controle.nb_classes,
-      controle.premium_incorrects,
-      controle.ordinaires_incorrects,
-      controle.zscores_incorrects,
+      FROM revenue_product;
 
-      (
-        SELECT COUNT(*)
-        FROM merged_data
-      ) AS nb_lignes_fusion
+    fetchType: FETCH_ONE
 
-    FROM controle;
 
-  fetchType: FETCH_ONE
+  - id: assert_ca
+    type: io.kestra.plugin.core.execution.Assert
 
-- id: assert_zscore
-  type: io.kestra.plugin.core.execution.Assert
+    conditions:
+      - "{{ outputs.test_ca.row.nb_lignes_ca == outputs.test_jointure.row.nb_lignes_fusion }}"
+      - "{{ outputs.test_ca.row.lignes_ca_incoherentes == 0 }}"
+      - "{{ outputs.test_ca.row.ecart_ca_total <= 0.005 }}"
 
-  conditions:
-  - "{{ outputs.test_zscore.row.nb_classes == outputs.test_zscore.row.nb_lignes_fusion }}"
-  - "{{ outputs.test_zscore.row.premium_incorrects == 0 }}"
-  - "{{ outputs.test_zscore.row.ordinaires_incorrects == 0 }}"
-  - "{{ outputs.test_zscore.row.zscores_incorrects == 0 }}"
+    errorMessage: |
+      Le chiffre d'affaires calculé est incohérent
+      avec prix × quantité vendue ou avec la somme globale.
 
-  errorMessage: |
-    Le calcul ou la classification du z-score est incohérent.
 
-- id: export_ca
-  type: io.kestra.plugin.scripts.python.Commands
+  # ============================================================
+  # 11 - CALCUL DU Z-SCORE
+  # ============================================================
 
-  taskRunner:
-    type: io.kestra.plugin.scripts.runner.docker.Docker
+  - id: calcul_zscore
+    type: io.kestra.plugin.scripts.python.Commands
 
-  containerImage: python:3.12-slim
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
 
-  namespaceFiles:
-    enabled: true
-    include:
-    - python/export_revenue.py
+    containerImage: python:3.12-slim
 
-  inputFiles:
-    work/comptoir.duckdb: "{{ outputs.calcul_ca.databaseUri }}"
+    namespaceFiles:
+      enabled: true
+      include:
+        - python/zscore.py
 
-  beforeCommands:
-  - >
-    python -m pip install --no-cache-dir duckdb==1.5.5 pandas==3.0.6 openpyxl==3.1.5
+    inputFiles:
+      work/comptoir.duckdb: "{{ outputs.calcul_ca.databaseUri }}"
 
-  commands:
-  - >
-    python python/export_revenue.py
+    beforeCommands:
+      - python -m pip install --no-cache-dir duckdb==1.5.5 pandas==3.0.6
 
-  outputFiles:
-  - outputs/chiffre_affaires.xlsx
+    commands:
+      - >
+        python python/zscore.py
 
-  retry:
-    type: constant
-    interval: PT10S
-    maxAttempts: 3
-    maxDuration: PT1M
-    warningOnRetry: true
+    outputFiles:
+      - outputs/vins_premium.csv
+      - outputs/vins_ordinaires.csv
 
-- id: publier_outputs
-  type: io.kestra.plugin.fs.local.Uploads
+    retry:
+      type: constant
+      interval: PT10S
+      maxAttempts: 3
+      maxDuration: PT1M
+      warningOnRetry: true
 
-  from:
-    chiffre_affaires.xlsx: "{{ outputs.export_ca.outputFiles['outputs/chiffre_affaires.xlsx'] }}"
-    vins_premium.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_premium.csv'] }}"
-    vins_ordinaires.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_ordinaires.csv'] }}"
 
-  to: /project/outputs
-  overwrite: true
+  # ============================================================
+  # 12 - TEST DU Z-SCORE
+  # ============================================================
 
-- id: journal_succes
-  type: io.kestra.plugin.core.log.Log
+  - id: test_zscore
+    type: io.kestra.plugin.jdbc.duckdb.Query
 
-  message: |
-    Pipeline Comptoir des Coteaux terminé avec succès.
+    databaseUri: "{{ outputs.calcul_ca.databaseUri }}"
 
-    Produits fusionnés :
-    {{ outputs.test_jointure.row.nb_lignes_fusion }}
+    inputFiles:
+      vins_premium.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_premium.csv'] }}"
+      vins_ordinaires.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_ordinaires.csv'] }}"
 
-    Liaisons sans id_web :
-    {{ outputs.test_valeurs_manquantes.row.liaisons_sans_id_web }}
+    sql: |
+      WITH classifications AS (
 
-    Produits Web sans SKU :
-    {{ outputs.test_valeurs_manquantes.row.produits_web_sans_sku }}
+        SELECT
+          *,
+          'premium' AS categorie
+        FROM read_csv_auto(
+          'vins_premium.csv',
+          header = true
+        )
 
-    Fichiers publiés :
-    - chiffre_affaires.xlsx
-    - vins_premium.csv
-    - vins_ordinaires.csv
+        UNION ALL BY NAME
+
+        SELECT
+          *,
+          'ordinaire' AS categorie
+        FROM read_csv_auto(
+          'vins_ordinaires.csv',
+          header = true
+        )
+      ),
+
+      statistiques AS (
+
+        SELECT
+          AVG(
+            CAST(price AS DOUBLE)
+          ) AS moyenne_prix,
+
+          STDDEV_POP(
+            CAST(price AS DOUBLE)
+          ) AS ecart_type_prix
+
+        FROM classifications
+      ),
+
+      controle AS (
+
+        SELECT
+
+          COUNT(*) AS nb_classes,
+
+          COUNT(*) FILTER (
+            WHERE categorie = 'premium'
+              AND CAST(zscore AS DOUBLE) <= 2
+          ) AS premium_incorrects,
+
+          COUNT(*) FILTER (
+            WHERE categorie = 'ordinaire'
+              AND CAST(zscore AS DOUBLE) > 2
+          ) AS ordinaires_incorrects,
+
+          COUNT(*) FILTER (
+            WHERE ABS(
+              CAST(zscore AS DOUBLE)
+              -
+              CASE
+                WHEN statistiques.ecart_type_prix = 0
+                  THEN 0
+                ELSE
+                  (
+                    CAST(price AS DOUBLE)
+                    - statistiques.moyenne_prix
+                  )
+                  / statistiques.ecart_type_prix
+              END
+            ) > 0.000000001
+          ) AS zscores_incorrects
+
+        FROM classifications
+
+        CROSS JOIN statistiques
+      )
+
+      SELECT
+
+        controle.nb_classes,
+        controle.premium_incorrects,
+        controle.ordinaires_incorrects,
+        controle.zscores_incorrects,
+
+        (
+          SELECT COUNT(*)
+          FROM merged_data
+        ) AS nb_lignes_fusion
+
+      FROM controle;
+
+    fetchType: FETCH_ONE
+
+
+  - id: assert_zscore
+    type: io.kestra.plugin.core.execution.Assert
+
+    conditions:
+      - "{{ outputs.test_zscore.row.nb_classes == outputs.test_zscore.row.nb_lignes_fusion }}"
+      - "{{ outputs.test_zscore.row.premium_incorrects == 0 }}"
+      - "{{ outputs.test_zscore.row.ordinaires_incorrects == 0 }}"
+      - "{{ outputs.test_zscore.row.zscores_incorrects == 0 }}"
+
+    errorMessage: |
+      Le calcul ou la classification
+      du z-score est incohérent.
+
+
+  # ============================================================
+  # 13 - BRANCHES PREMIUM / ORDINAIRES EN PARALLELE
+  # ============================================================
+
+  - id: branches_vins
+    type: io.kestra.plugin.core.flow.Parallel
+
+    tasks:
+
+      - id: publier_premium
+        type: io.kestra.plugin.fs.local.Uploads
+
+        from:
+          vins_premium.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_premium.csv'] }}"
+
+        to: /project/outputs
+        overwrite: true
+
+
+      - id: publier_ordinaires
+        type: io.kestra.plugin.fs.local.Uploads
+
+        from:
+          vins_ordinaires.csv: "{{ outputs.calcul_zscore.outputFiles['outputs/vins_ordinaires.csv'] }}"
+
+        to: /project/outputs
+        overwrite: true
+
+
+  # ============================================================
+  # 14 - EXPORT DU RAPPORT DE CHIFFRE D'AFFAIRES
+  # ============================================================
+
+  - id: export_ca
+    type: io.kestra.plugin.scripts.python.Commands
+
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+
+    containerImage: python:3.12-slim
+
+    namespaceFiles:
+      enabled: true
+      include:
+        - python/export_revenue.py
+
+    inputFiles:
+      work/comptoir.duckdb: "{{ outputs.calcul_ca.databaseUri }}"
+
+    beforeCommands:
+      - >
+        python -m pip install
+        --no-cache-dir
+        duckdb==1.5.5
+        pandas==3.0.6
+        openpyxl==3.1.5
+
+    commands:
+      - >
+        python python/export_revenue.py
+
+    outputFiles:
+      - outputs/chiffre_affaires.xlsx
+
+    retry:
+      type: constant
+      interval: PT10S
+      maxAttempts: 3
+      maxDuration: PT1M
+      warningOnRetry: true
+
+
+  # ============================================================
+  # 15 - PUBLICATION DU RAPPORT CA
+  # ============================================================
+
+  - id: publier_ca
+    type: io.kestra.plugin.fs.local.Uploads
+
+    from:
+      chiffre_affaires.xlsx: "{{ outputs.export_ca.outputFiles['outputs/chiffre_affaires.xlsx'] }}"
+
+    to: /project/outputs
+    overwrite: true
+
+
+  # ============================================================
+  # 16 - JOURNAL DE SUCCES
+  # ============================================================
+
+  - id: journal_succes
+    type: io.kestra.plugin.core.log.Log
+
+    message: |
+      Pipeline Comptoir des Coteaux terminé avec succès.
+
+      Produits fusionnés :
+      {{ outputs.test_jointure.row.nb_lignes_fusion }}
+
+      Liaisons sans id_web :
+      {{ outputs.test_valeurs_manquantes.row.liaisons_sans_id_web }}
+
+      Fichiers publiés :
+      - chiffre_affaires.xlsx
+      - vins_premium.csv
+      - vins_ordinaires.csv
+
+
+# ============================================================
+# PLANIFICATION
+# ============================================================
 
 triggers:
 
-- id: lancement_mensuel
-  type: io.kestra.plugin.core.trigger.Schedule
+  - id: lancement_mensuel
+    type: io.kestra.plugin.core.trigger.Schedule
 
-  cron: "0 9 15 * *"
-  timezone: Europe/Paris
+    cron: "0 9 15 * *"
+    timezone: Europe/Paris
+
+
+# ============================================================
+# GESTION DES ERREURS
+# ============================================================
 
 errors:
 
-- id: journal_erreur
-  type: io.kestra.plugin.core.log.Log
+  - id: journal_erreur
+    type: io.kestra.plugin.core.log.Log
 
-  message: |
-    Échec du pipeline {{ flow.namespace }}.{{ flow.id }}
-    Execution : {{ execution.id }}
-    Erreur : {{ errorLogs() }}
+    message: |
+      Échec du pipeline {{ flow.namespace }}.{{ flow.id }}
+
+      Execution :
+      {{ execution.id }}
+
+      Erreur :
+      {{ errorLogs() }}

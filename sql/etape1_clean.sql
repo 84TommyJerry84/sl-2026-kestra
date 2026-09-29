@@ -33,4 +33,6 @@ FROM read_csv_auto(
     'prepared/web.csv',
     header = true,
     all_varchar = true
-);
+)
+WHERE sku IS NOT NULL
+  AND TRIM(sku) <> '';
